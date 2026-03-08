@@ -31,6 +31,7 @@ The fastest way to run this API is via the pre-configured Docker container.
     docker build -t factory-aoi-api:v1 .
 
 3. **Deploy the container (Port Binding 8000):**
+    ```bash
     docker run -p 8000:8000 factory-aoi-api:v1
 
 ## API Usage & Telemetry
