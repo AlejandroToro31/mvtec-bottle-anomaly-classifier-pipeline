@@ -27,6 +27,7 @@ The fastest way to run this API is via the pre-configured Docker container.
    cd mvtec-bottle-anomaly-classifier-pipeline
 
 2. **Build the immutable image:**
+    ```bash
     docker build -t factory-aoi-api:v1 .
 
 3. **Deploy the container (Port Binding 8000):**
