@@ -23,8 +23,8 @@ The fastest way to run this API is via the pre-configured Docker container.
 
 1. **Clone the repository:**
    ```bash
-   git clone [https://github.com/YourUsername/mvtec-anomaly-api.git](https://github.com/YourUsername/mvtec-anomaly-api.git)
-   cd mvtec-anomaly-api
+   git clone [https://github.com/AlejandroToro31/mvtec-bottle-anomaly-classifier-pipeline.git](https://github.com/AlejandroToro31/mvtec-bottle-anomaly-classifier-pipeline.git)
+   cd mvtec-bottle-anomaly-classifier-pipeline
 
 2. **Build the immutable image:**
     docker build -t factory-aoi-api:v1 .
