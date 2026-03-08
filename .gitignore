@@ -1,0 +1,10 @@
+# Environments
+venv/
+__pycache__/
+.env
+
+# Datasets & Media (Keep these off GitHub)
+bottle/
+*.tar.xz
+*.mp4
+*.zip

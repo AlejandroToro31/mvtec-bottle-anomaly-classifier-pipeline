@@ -1,0 +1,12 @@
+# Environments & Git
+venv/
+__pycache__/
+.git/
+
+# Ignore the entire R&D zone to keep the container tiny
+research/
+*.ipynb
+
+# Datasets
+bottle/
+*.tar.xz
