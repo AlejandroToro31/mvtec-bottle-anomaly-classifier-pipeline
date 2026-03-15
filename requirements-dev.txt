@@ -1,0 +1,12 @@
+# 1. Inherit the production dependencies (FastAPI, CPU-PyTorch, etc.)
+-r requirements.txt
+
+# 2. Add Jupyter infrastructure to run the notebook
+jupyterlab
+ipywidgets
+
+# 3. Add Research & Visualization libraries
+numpy
+matplotlib
+tqdm
+scikit-learn
