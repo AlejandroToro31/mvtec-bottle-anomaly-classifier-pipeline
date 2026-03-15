@@ -99,7 +99,7 @@ async def predict_bottle_quality(file: UploadFile = File(...)):
         predicted_class = CLASS_NAMES[predicted_idx.item()]
         confidence_score = confidence.item()
 
-        logger.info(f"🔍 Evaluated '{file.filename}': {predicted_class.upper()} ({confidence_score:.4f})")
+        logger.info(f"Evaluated '{file.filename}': {predicted_class.upper()} ({confidence_score:.4f})")
 
         return PredictionResponse(
             filename=file.filename,
