@@ -12,20 +12,18 @@ from pydantic import BaseModel
 # --- LOGGING SETUP ---
 logging.basicConfig(
     level=logging.INFO,
-    format='%(asctime)s - [FACTORY-API] - %(levelname)s - %(message)s'
+    format='%(asctime)s - [FACTORY-API] - %(levelname)s - %(message)s',
+    datefmt='%H:%M:%S'
 )
 logger = logging.getLogger("FactoryAPI")
 
 # --- GLOBAL STATE ---
-# We define these globally so they persist across HTTP requests
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-# If the environment variable exists, use it. If not, default to our current path.
 MODEL_PATH = os.getenv("MODEL_PATH", "models/best_model_mvtec.pth")
-CLASS_NAMES = ['anomaly', 'good'] # Ensure this matches your train_ds.classes alphabetically
-model = None
+CLASS_NAMES = ['anomaly', 'good']
+ml_state = {} # UPGRADE: Replaces 'global model' for safer memory management if we ever scale to multi-processing
 
 # --- THE PREPROCESSING PIPELINE ---
-# Must strictly match the validation transforms from BottleQualityController
 image_transforms = transforms.Compose([
     transforms.Resize(256),
     transforms.CenterCrop(224),
@@ -36,35 +34,33 @@ image_transforms = transforms.Compose([
 # --- SERVER LIFESPAN MANAGEMENT ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """
-    Executes exactly once when the server boots up.
-    Allocates the model to VRAM to prevent loading latency on individual requests.
-    """
-    global model
+    """Executes exactly once when the server boots up."""
     logger.info("Booting Factory Vision API...")
     logger.info(f"Allocating model to: {DEVICE.type.upper()}")
     
     try:
-        # Reconstruct Architecture
-        weights = models.ResNet18_Weights.IMAGENET1K_V1
-        model = models.resnet18(weights=weights)
+        # Reconstruct Architecture 
+        # UPGRADE: weights=None prevents redundant internet downloads on boot
+        model = models.resnet18(weights=None)
         num_ftrs = model.fc.in_features
-        model.fc = nn.Linear(num_ftrs, 2) # 2 Classes: anomaly, good
+        model.fc = nn.Linear(num_ftrs, 2) 
         
         # Inject Trained Artifact
         model.load_state_dict(torch.load(MODEL_PATH, map_location=DEVICE))
         model = model.to(DEVICE)
-        model.eval() # Lock dropout and batchnorm layers
+        model.eval() 
+        
+        ml_state["model"] = model
         logger.info("Neural Network successfully locked in VRAM.")
     except Exception as e:
         logger.critical(f"Failed to load model artifact: {e}")
         raise RuntimeError("Server boot aborted due to missing artifact.")
         
-    yield # Server is now running and accepting requests
+    yield 
     
-    # Cleanup (Executes when server shuts down)
+    # Cleanup 
     logger.info("Shutting down. Clearing VRAM...")
-    model = None
+    ml_state.clear()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
@@ -85,30 +81,19 @@ class PredictionResponse(BaseModel):
 # --- THE ENDPOINT ---
 @app.post("/predict/", response_model=PredictionResponse)
 async def predict_bottle_quality(file: UploadFile = File(...)):
-    """
-    Receives an image byte stream, executes inference, and returns a JSON payload.
-    """
-    # Security & Validation: Ensure file is an image
     if not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Invalid file type. Please upload an image.")
 
     try:
-        # 1. Read bytes from network into memory
         image_bytes = await file.read()
-        
-        # 2. Decode bytes into a PIL Image (RGB)
         img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
         
-        # 3. Apply tensor transformations and add batch dimension (B, C, H, W)
         img_tensor = image_transforms(img).unsqueeze(0).to(DEVICE)
+        model = ml_state["model"] # UPGRADE: Fetching model safely from state dictionary
         
-        # 4. Execute Forward Pass (Inference)
         with torch.no_grad():
             logits = model(img_tensor)
-            # Apply Softmax to get probabilities (0.0 to 1.0)
             probabilities = torch.nn.functional.softmax(logits, dim=1)
-            
-            # Extract highest probability and its corresponding class index
             confidence, predicted_idx = torch.max(probabilities, 1)
             
         predicted_class = CLASS_NAMES[predicted_idx.item()]
@@ -116,7 +101,6 @@ async def predict_bottle_quality(file: UploadFile = File(...)):
 
         logger.info(f"🔍 Evaluated '{file.filename}': {predicted_class.upper()} ({confidence_score:.4f})")
 
-        # 5. Return JSON Response
         return PredictionResponse(
             filename=file.filename,
             prediction=predicted_class,

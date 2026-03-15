@@ -1,6 +1,10 @@
 fastapi
 uvicorn[standard]
 python-multipart
+Pillow
+pydantic
+
+# MLOps Optimization: Force CPU-only PyTorch to shrink Docker image size
+--extra-index-url https://download.pytorch.org/whl/cpu
 torch
 torchvision
-Pillow
