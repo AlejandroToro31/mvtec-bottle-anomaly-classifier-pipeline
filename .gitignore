@@ -8,4 +8,4 @@ bottle/
 *.tar.xz
 *.mp4
 *.zip
-*.pth
+models/*.pth
