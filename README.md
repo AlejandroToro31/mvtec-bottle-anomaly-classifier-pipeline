@@ -1,84 +1,73 @@
-# Automated Quality Control API (MVTec Anomaly Detection)
+# Industrial Machine Vision Microservice (MVTec Anomaly Detection)
 
-An end-to-end Machine Learning pipeline and asynchronous REST API for real-time visual inspection of manufacturing defects. 
+An end-to-end Machine Learning Operations (MLOps) pipeline and asynchronous REST API designed for real-time visual inspection of manufacturing defects. 
 
 ## Architecture Overview
-This system utilizes a Convolutional Neural Network (ResNet18) fine-tuned on the MVTec AD dataset to detect structural anomalies in glass bottles. The inference engine is wrapped in a highly concurrent FastAPI server and fully containerized via Docker for immutable, cloud-ready deployment.
+
+This system utilizes a Convolutional Neural Network (ResNet-18) fine-tuned on the MVTec AD dataset to detect structural anomalies. The model is wrapped in a highly concurrent FastAPI server, containerized via Docker, and engineered specifically for physical factory deployment.
 
 **Key Engineering Features:**
-* **Model:** ResNet18 (PyTorch) adapted for binary classification (Anomaly vs. Good).
-* **Inference Backend:** Optimized for CPU batch-size-1 inference to minimize cloud compute costs and cold-start latency.
-* **API Framework:** Asynchronous routing via FastAPI and Uvicorn.
-* **Infrastructure:** Containerized with Docker, featuring failover configurations for registry network isolation.
+* **Industrial ETL Bridge:** Utilizes `opencv-python-headless` to extract and decode raw byte streams (`cv2.imdecode`), simulating the exact data flow of physical industrial cameras.
+* **Automated QA Routing (Disk I/O):** Features conditional persistence logic. Anomalous matrices are physically routed and saved to a dedicated mounted volume for human review and future model retraining.
+* **Execution Telemetry:** Built-in performance profiling that returns exact millisecond latency metrics for CPU/GPU forward passes.
+* **DevSecOps Secured:** Protected by memory-exhaustion payload limiters (10MB max) and cryptographic API Key locks.
 
 ## Tech Stack
 * **Deep Learning:** PyTorch, Torchvision
 * **Web Server:** FastAPI, Uvicorn, Pydantic
-* **Data Processing:** Pillow (PIL)
+* **Data Processing:** OpenCV, NumPy
 * **DevOps/MLOps:** Docker
 
 ## Quick Start (Docker Deployment)
 
-The fastest way to run this API is via the pre-configured Docker container. 
+The API is fully containerized for immutable deployment. Because the microservice writes defective images to the disk, you **must** mount a local volume during execution.
 
 1. **Clone the repository:**
    ```bash
    git clone [https://github.com/AlejandroToro31/mvtec-bottle-anomaly-classifier-pipeline.git](https://github.com/AlejandroToro31/mvtec-bottle-anomaly-classifier-pipeline.git)
    cd mvtec-bottle-anomaly-classifier-pipeline
+    ```
 
 2. **Build the immutable image:**
-    ```bash
-    docker build -t factory-aoi-api:v1 .
-
-3. **Deploy the container (Port Binding 8000):**
-    ```bash
-    docker run -p 8000:8000 factory-aoi-api:v1
-
-## API Usage & Telemetry
-Once the container is actively listening, navigate to the built-in Swagger UI to test the endpoints:
-http://localhost:8000/docs
-
-## Live API Testing (DevSecOps Secured)
-
-This inference endpoint is strictly protected by memory-exhaustion payload limiters (10MB max) and an API Key lock to prevent unauthorized VRAM consumption.
-
-To test the model's predictions, please use the following temporary evaluation key:
-**`mvtec_dev_key`**
-
-### Option A: The Visual Web Interface (Recommended)
-FastAPI provides a built-in interactive testing environment.
-
-1. Run the Docker container and navigate to `http://localhost:8000/docs`.
-2. Click the green **Authorize** button in the top right corner.
-3. Paste the evaluation key into the `Authorization-API-Key` field and click Authorize.
-4. Open the `POST /predict/` dropdown, click **Try it out**, upload any image of an ant or bee, and click **Execute** to see the real-time classification.
-
-### Option B: The Terminal
-If you prefer to bypass the UI and test the raw JSON response and header validation directly:
-
-```bash
-curl -X 'POST' \
-  'http://localhost:8000/predict/' \
-  -H 'Authorization-API-Key: mvtec_dev_key' \
-  -H 'accept: application/json' \
-  -H 'Content-Type: multipart/form-data' \
-  -F 'file=@your_test_image.jpg'
+```Bash
+docker build -t factory-aoi-api:v1 .
 ```
 
-# Research & Development (Local Environment)
-To reproduce the training metrics or experiment with the model architecture, you must install the heavier research dependencies.
-
-1. Clone the repository and initialize a virtual environment (Conda recommended).
-
-2. Install the isolated development requirements:
-
-```bash
-pip install -r requirements-dev.txt
+3. **Deploy the container (Port Binding & Volume Mounting):**
+```Bash
+docker run -p 8000:8000 -v $(pwd)/data/review_queue:/app/data/review_queue factory-aoi-api:v1
 ```
 
-3. Launch the Jupyter environment to access research/Anomaly_Detector.ipynb.
+# Hardware Simulation & Integration Testing
+This repository includes a test_client.py module designed to simulate an industrial camera streaming raw byte arrays to the FastAPI microservice.
 
-Note: The Jupyter notebook contains an automated pipeline that will automatically download and extract the MVTec dataset if it is not found locally.
+## Execution Protocol:
+To verify the end-to-end ETL pipeline and Automated QA routing, open two separate terminal instances:
 
-## Edge Case Testing (Domain Shift)
-This API has been rigorously tested against Out-of-Distribution (OOD) data. Images lacking the specific spatial manifold and industrial dark-field lighting of the MVTec dataset will trigger feature collapse, defaulting to an anomaly prediction due to Softmax overconfidence. The system is designed strictly for fixed-camera, controlled-lighting environments.
+## Terminal 1 (Boot the Inference Node):
+(Either run the Docker container above, or boot locally via Uvicorn)
+
+```Bash
+uvicorn app.main:app --reload
+```
+## Terminal 2 (Execute the Camera Simulator):
+
+```Bash
+python tests/test_client.py
+```
+## Expected Telemetry Output:
+The client will transmit the test payload (tests/assets/sample_defect.png). The API will decode the byte stream via OpenCV, execute the PyTorch forward pass, and physically route the anomalous matrix to the data/review_queue volume. Execution latency and network ping will be returned in the terminal.
+
+# Live API Testing (Swagger UI)
+Once the container is actively listening, navigate to http://localhost:8000/docs to access the interactive testing environment.
+
+1. To test the endpoint, use the temporary evaluation key: mvtec_dev_key
+
+2. Click the green Authorize button in the top right corner.
+
+3. Paste the evaluation key into the Authorization-API-Key field.
+
+4. Open the POST /predict/ dropdown, click Try it out, upload any sample image of an MVTec bottle, and click Execute.
+
+# Edge Case Testing (Domain Shift)
+This API operates strictly within the structural constraints of the MVTec spatial manifold. Images lacking industrial dark-field lighting or presenting severe Out-of-Distribution (OOD) geometry will trigger feature collapse, defaulting to an anomaly prediction. The system is designed strictly for fixed-camera, controlled-lighting environments.

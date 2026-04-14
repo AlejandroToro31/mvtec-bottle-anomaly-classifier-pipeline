@@ -1,6 +1,10 @@
 import io
 import os
+import time
 import logging
+from datetime import datetime
+import cv2
+import numpy as np
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
@@ -18,31 +22,22 @@ logging.basicConfig(
 )
 logger = logging.getLogger("MVtecAPI")
 
-# --- GLOBAL STATE ---
+# --- GLOBAL STATE & I/O INFRASTRUCTURE ---
 DEVICE = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 MODEL_PATH = os.getenv("MODEL_PATH", "models/best_model_mvtec.pth")
+REVIEW_QUEUE_DIR = os.getenv("REVIEW_QUEUE_DIR", "data/review_queue")
 CLASS_NAMES = ['anomaly', 'good']
-ml_state = {} # UPGRADE: Replaces 'global model' for safer memory management if we ever scale to multi-processing
+ml_state = {}
 
-# Authorization Infrastructure
-# We use FastAPI's native security module so it integrates cleanly with Swagger UI.
 API_KEY_NAME = "Authorization-API-Key"
-API_KEY_HEADER = APIKeyHeader(name= API_KEY_NAME, auto_error=True)
-
-# In production, this must be injected via Docker environment variables.
-# We set a strict fallback key for local testing.
+API_KEY_HEADER = APIKeyHeader(name=API_KEY_NAME, auto_error=True)
 VALID_API_KEY = os.getenv("API_SECRET_KEY", "mvtec_dev_key")
 
 def verify_api_key(api_key_header: str = Security(API_KEY_HEADER)):
-    """
-    Validates the incoming cryptographic token. If missing or incorrect,
-    the API severs the connection before the ML engine is ever touched.
-    """
+    """Validates the incoming cryptographic token to prevent unauthorized inference requests."""
     if api_key_header != VALID_API_KEY:
-
         logger.warning("SECURITY ALERT: Unauthorized access attempt intercepted.")
         raise HTTPException(status_code=401, detail="Invalid API Key. Access Denied.")
-    
     return api_key_header
 
 # --- THE PREPROCESSING PIPELINE ---
@@ -55,13 +50,16 @@ image_transforms = transforms.Compose([
 # --- SERVER LIFESPAN MANAGEMENT ---
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Executes exactly once when the server boots up."""
+    """Executes initial hardware allocation and directory mounting on server boot."""
     logger.info("Booting Factory Vision API...")
     logger.info(f"Allocating model to: {DEVICE.type.upper()}")
     
+    # Mount Disk I/O Directory for Automated Labeling Pipeline
+    os.makedirs(REVIEW_QUEUE_DIR, exist_ok=True)
+    logger.info(f"Disk I/O volume mounted at: {REVIEW_QUEUE_DIR}")
+    
     try:
-        # Reconstruct Architecture 
-        # UPGRADE: weights=None prevents redundant internet downloads on boot
+        # Reconstruct Architecture in VRAM
         model = models.resnet18(weights=None)
         num_ftrs = model.fc.in_features
         model.fc = nn.Linear(num_ftrs, 2) 
@@ -79,17 +77,15 @@ async def lifespan(app: FastAPI):
         
     yield 
     
-    # Cleanup 
     logger.info("Shutting down. Clearing VRAM...")
     ml_state.clear()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
 
-# --- API INSTANTIATION ---
 app = FastAPI(
     title="Factory Quality Control API",
-    description="Real-time Computer Vision endpoint for bottle defect detection.",
-    version="1.0.0",
+    description="Real-time Computer Vision microservice for automated defect detection.",
+    version="1.1.0",
     lifespan=lifespan
 )
 
@@ -98,43 +94,53 @@ class PredictionResponse(BaseModel):
     filename: str
     prediction: str
     confidence: float
+    latency_ms: float
 
-# --- THE ENDPOINT ---
+# --- THE INFERENCE ENDPOINT ---
 @app.post("/predict/", response_model=PredictionResponse)
 async def predict_bottle_quality(
     file: UploadFile = File(...),
     api_key: str = Security(verify_api_key),
     content_length: int = Header(0, alias="Content-Length")
-    
     ):
-
-    # We inspect the HTTP header BEFORE attempting to read the file into RAM.
-    # 10 MB = 10 * 1024 * 1024 bytes
-    MAX_FILE_SIZE_BYTES = 10485760 
     
+    # Pre-computation Payload Verification
+    MAX_FILE_SIZE_BYTES = 10485760 
     if content_length > MAX_FILE_SIZE_BYTES:
-
-        logger.warning(f"SECURITY ALERT: Payload rejected. Size {content_length} bytes exceeds 10MB limit.")
-        raise HTTPException(status_code=413, detail="Payload Too Large. Maximum size is 10MB.")
+        logger.warning(f"SECURITY ALERT: Payload size {content_length} bytes exceeds hardware limit.")
+        raise HTTPException(status_code=413, detail="Payload Too Large.")
 
     if not file.content_type.startswith("image/"):
-        raise HTTPException(status_code=400, detail="Invalid file type. Please upload an image.")
+        raise HTTPException(status_code=400, detail="Invalid payload. Image required.")
 
     try:
+        # System Telemetry: Initialize execution timer
+        inference_start = time.perf_counter()
+
         image_bytes = await file.read()
-
-        # Malicious actors can spoof the Content-Length header to bypass the first check.
-        # We physically count the bytes after ingestion to guarantee memory safety.
         if len(image_bytes) > MAX_FILE_SIZE_BYTES:
-             
-             logger.warning("SECURITY ALERT: Spoofed header detected. File size exceeds 10MB limit.")
-             raise HTTPException(status_code=413, detail="Payload Too Large. Maximum size is 10MB.")
+             logger.warning("SECURITY ALERT: Spoofed header detected.")
+             raise HTTPException(status_code=413, detail="Payload Too Large.")
 
-        img = Image.open(io.BytesIO(image_bytes)).convert('RGB')
+        # ==========================================
+        # UPGRADE 1: OpenCV ETL Bridge
+        # Simulating industrial camera raw byte stream decoding.
+        # cv2.imdecode parses the byte array directly into a BGR matrix.
+        # ==========================================
+        np_arr = np.frombuffer(image_bytes, np.uint8)
+        img_cv = cv2.imdecode(np_arr, cv2.IMREAD_COLOR)
         
-        img_tensor = image_transforms(img).unsqueeze(0).to(DEVICE)
-        model = ml_state["model"] # UPGRADE: Fetching model safely from state dictionary
+        if img_cv is None:
+            raise UnidentifiedImageError("OpenCV failed to decode byte stream.")
+
+        # Transform BGR (OpenCV standard) to RGB (PyTorch standard)
+        img_rgb = cv2.cvtColor(img_cv, cv2.COLOR_BGR2RGB)
+        img_pil = Image.fromarray(img_rgb)
         
+        img_tensor = image_transforms(img_pil).unsqueeze(0).to(DEVICE)
+        model = ml_state["model"] 
+        
+        # GPU/CPU Forward Pass
         with torch.no_grad():
             logits = model(img_tensor)
             probabilities = torch.nn.functional.softmax(logits, dim=1)
@@ -143,16 +149,32 @@ async def predict_bottle_quality(
         predicted_class = CLASS_NAMES[predicted_idx.item()]
         confidence_score = confidence.item()
 
-        logger.info(f"Evaluated '{file.filename}': {predicted_class.upper()} ({confidence_score:.4f})")
+        # ==========================================
+        # UPGRADE 2: Automated QA Routing (Disk I/O)
+        # If the forward pass detects an anomaly, write the raw BGR matrix 
+        # to the physical disk volume for human review and future training.
+        # ==========================================
+        if predicted_class == 'anomaly':
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            save_path = os.path.join(REVIEW_QUEUE_DIR, f"{timestamp}_{file.filename}")
+            cv2.imwrite(save_path, img_cv)
+            logger.warning(f"ANOMALY DETECTED: Image matrix routed to persistent storage -> {save_path}")
+
+        # System Telemetry: Halt execution timer
+        inference_end = time.perf_counter()
+        latency_ms = (inference_end - inference_start) * 1000
+
+        logger.info(f"Execution complete: {file.filename} | {predicted_class.upper()} ({confidence_score:.4f}) | Latency: {latency_ms:.2f}ms")
 
         return PredictionResponse(
             filename=file.filename,
             prediction=predicted_class,
-            confidence=round(confidence_score, 4)
+            confidence=round(confidence_score, 4),
+            latency_ms=round(latency_ms, 2)
         )
 
     except UnidentifiedImageError:
-        raise HTTPException(status_code=400, detail="Corrupted image file.")
+        raise HTTPException(status_code=400, detail="Corrupted image matrix.")
     except Exception as e:
-        logger.error(f"Inference Error: {str(e)}")
-        raise HTTPException(status_code=500, detail="Internal Server Error during inference.")
+        logger.error(f"Hardware/Execution Error: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal Server Error during execution.")

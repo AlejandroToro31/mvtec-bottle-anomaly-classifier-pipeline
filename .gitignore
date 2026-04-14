@@ -3,8 +3,9 @@ venv/
 __pycache__/
 .env
 
-# Datasets & Media (Keep these off GitHub)
+# Datasets & Media
 bottle/
 *.tar.xz
 *.mp4
 *.zip
+*.pth
