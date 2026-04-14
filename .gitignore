@@ -9,3 +9,4 @@ bottle/
 *.mp4
 *.zip
 models/*.pth
+models/*.pt
