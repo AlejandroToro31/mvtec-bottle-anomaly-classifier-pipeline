@@ -1,27 +1,33 @@
 # Base Image
 FROM mirror.gcr.io/library/python:3.10-slim
 
-# Set working directory
-WORKDIR /workspace
+# System Variables
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
 
-# Install dependencies first (for layer caching)
+# DevSecOps: Create the non-root system user
+# -m ensures the ~/.cache directory exists for PyTorch
+RUN useradd -m -r api_user
+
+# Working Directory Setup
+# We create the folder and give it to the user immediately
+WORKDIR /workspace
+RUN chown api_user /workspace
+
+# Layer Caching: Install dependencies as root (to prevent permission errors)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the specific microservice folders
-COPY app/ app/
-COPY models/ models/
+# 6. Inject Microservice Code
+# We copy and change ownership in a single layer to prevent image bloat
+COPY --chown=api_user:api_user app/ app/
+COPY --chown=api_user:api_user models/ models/
 
-# --- Security upgrade: Non-Root Execution ---
-# Create a dummy user named 'api_user' with no admin rights
-RUN useradd -m -r api_user 
-# Give the dummy user ownership of the workspace folder so it can read the model
-RUN chown -R api_user /workspace
-# Tell Docker to switch to this dummy user before starting the server
+# 7. Drop Privileges: Switch to the secure non-root user
 USER api_user
 
-# Expose the API port
+# 8. Expose the API Port
 EXPOSE 8000
 
-# Execute Uvicorn, pointing it into the app directory
+# 9. Execute the Inference Engine
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
