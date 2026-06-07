@@ -36,6 +36,7 @@ import requests
 # ════════════════════════════════════════════════════════
 
 logging.basicConfig(
+
     level=logging.INFO,
     format="%(asctime)s - [CAMERA-SIM] - %(levelname)s - %(message)s",
     datefmt="%H:%M:%S",
@@ -73,13 +74,16 @@ def check_server_health() -> bool:
     Returns True if both pass, False otherwise.
     """
     logger.info("Checking server health before test run...")
+    
     try:
         health = requests.get(HEALTH_URL, timeout=TIMEOUT_SECONDS)
+        
         if health.status_code != 200:
             logger.error(f"Health check failed: {health.status_code}")
             return False
 
         ready = requests.get(READY_URL, timeout=TIMEOUT_SECONDS)
+        
         if ready.status_code != 200:
             logger.error(f"Readiness check failed — model may still be loading.")
             return False
@@ -88,6 +92,7 @@ def check_server_health() -> bool:
         return True
 
     except requests.exceptions.ConnectionError:
+        
         logger.error(
             f"Cannot connect to API at {API_BASE_URL}. "
             "Is the server running? Try: uvicorn app.main:app --host 0.0.0.0 --port 8000"
@@ -95,11 +100,7 @@ def check_server_health() -> bool:
         return False
 
 
-def send_image(
-    image_path: str,
-    headers: dict = HEADERS,
-    label: str = "test"
-) -> dict:
+def send_image(image_path: str, headers: dict = HEADERS, label: str = "test") -> dict:
     """
     Sends a single image to the inference endpoint and returns the response.
 
@@ -118,6 +119,7 @@ def send_image(
         dict with keys: status_code, json (if 200), network_ms, error (if not 200)
     """
     if not os.path.exists(image_path):
+
         logger.error(f"[{label}] Test asset not found: {image_path}")
         return {"status_code": -1, "error": f"File not found: {image_path}"}
 
@@ -169,16 +171,16 @@ def print_result(result: dict, expected_status: int = 200) -> bool:
     if passed and status == 200:
         payload = result["json"]
         logger.info(
-            f"  PASS ✓ | Prediction: {payload['prediction'].upper()} | "
+            f"  PASS | Prediction: {payload['prediction'].upper()} | "
             f"Confidence: {payload['confidence']} | "
             f"API latency: {payload['latency_ms']}ms | "
             f"Network: {result['network_ms']}ms"
         )
     elif passed:
-        logger.info(f"  PASS ✓ | Expected {expected_status}, got {status}")
+        logger.info(f"  PASS | Expected {expected_status}, got {status}")
     else:
         logger.error(
-            f"  FAIL ✗ | Expected {expected_status}, got {status} | "
+            f"  FAIL | Expected {expected_status}, got {status} | "
             f"Error: {result.get('error', 'unknown')}"
         )
 
@@ -208,6 +210,7 @@ def run_test_suite() -> None:
 
     # ── Test 0: Server readiness
     logger.info("\n[TEST 0] Server health check...")
+
     if not check_server_health():
         logger.error("Server not ready. Aborting test suite.")
         sys.exit(1)
@@ -217,6 +220,7 @@ def run_test_suite() -> None:
     logger.info(f"\n[TEST 1] Defect image inference — expects 'anomaly'...")
     result = send_image(DEFECT_IMAGE_PATH, label="DEFECT")
     passed = print_result(result, expected_status=200)
+
     if passed and result["json"]["prediction"] != "anomaly":
         logger.warning(
             f"  WARNING: Expected 'anomaly' but got '{result['json']['prediction']}'. "
@@ -228,6 +232,7 @@ def run_test_suite() -> None:
     logger.info(f"\n[TEST 2] Nominal image inference — expects 'good'...")
     result = send_image(GOOD_IMAGE_PATH, label="NOMINAL")
     passed = print_result(result, expected_status=200)
+
     if passed and result["json"]["prediction"] != "good":
         logger.warning(
             f"  WARNING: Expected 'good' but got '{result['json']['prediction']}'. "
@@ -238,6 +243,7 @@ def run_test_suite() -> None:
     # ── Test 3: Invalid file type — expects 400
     logger.info("\n[TEST 3] Invalid file type (PDF) — expects 400 Bad Request...")
     dummy_pdf_path = "/tmp/test_invalid.pdf"
+    
     with open(dummy_pdf_path, "wb") as f:
         f.write(b"%PDF-1.4 dummy content")
 
