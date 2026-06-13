@@ -1,12 +1,27 @@
-fastapi==0.104.1
-uvicorn==0.24.0
-python-multipart==0.0.6
-pydantic==2.5.2
-Pillow==11.3.0
+# ==============================================================
+# MVTec Anomaly Classifier API — Production Dependencies
+# ==============================================================
+# All versions pinned for deterministic builds.
+# Generate updated pins from working environment: pip freeze > requirements.txt
+# ==============================================================
 
-# MLOps Optimization: Force CPU-only PyTorch to shrink Docker image size
+# ── PyTorch CPU Index
+# CPU-only PyTorch wheel (~200MB) vs default CUDA wheel (~2.5GB).
+# --extra-index-url tells pip to check this index for +cpu variants.
+# Required because PyPI only hosts the full CUDA build by default.
 --extra-index-url https://download.pytorch.org/whl/cpu
+
+# ── API Framework
+fastapi==0.104.1
+uvicorn[standard]==0.24.0         # [standard] installs uvloop + httptools (C-based async backends)
+python-multipart==0.0.6           # Required by FastAPI for UploadFile multipart parsing
+pydantic==2.5.2
+
+# ── ML Engine (CPU-only)
 torch==2.1.1+cpu
 torchvision==0.16.1+cpu
+
+# ── Computer Vision & Image Processing
+opencv-python-headless==4.11.0.86  # Headless: no GUI dependencies — required for Docker Linux containers
+Pillow==11.3.0                      # Image I/O — PIL used for tensor preprocessing pipeline
 numpy==1.26.4
-opencv-python-headless== 4.11.0.86
