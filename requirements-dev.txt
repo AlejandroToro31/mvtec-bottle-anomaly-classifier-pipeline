@@ -1,11 +1,28 @@
-# 1. Inherit the production dependencies (FastAPI, CPU-PyTorch, etc.)
+# ==============================================================
+# MVTec Anomaly Classifier API — Development Dependencies
+# ==============================================================
+# Extends production requirements with research, visualization,
+# and testing tools. NOT included in the Docker production image.
+#
+# Install for local development:
+#   pip install -r requirements-dev.txt
+# ==============================================================
+
+# ── Production Dependencies (inherited)
+# Pulls in FastAPI, PyTorch CPU, OpenCV, Pydantic, etc.
 -r requirements.txt
 
-# 2. Add Jupyter infrastructure to run the notebook
+# ── Jupyter Research Environment
 jupyterlab==4.5.6
 ipywidgets==8.1.8
+ipykernel==6.29.5          # Required for JupyterLab Python kernel execution
 
-# 3. Add Research & Visualization libraries
-matplotlib==3.10.0
-tqdm==4.67.3
-scikit-learn==1.7.2
+# ── Research & Visualization
+matplotlib==3.10.0          # visualize_predictions() inspection grid
+tqdm==4.67.3                # Training loop progress bars
+
+# ── ML Metrics & Evaluation
+scikit-learn==1.7.2         # recall_score, roc_auc_score used in training pipeline
+
+# ── Testing & API Simulation
+requests==2.31.0            # test_client.py — industrial camera feed simulation
